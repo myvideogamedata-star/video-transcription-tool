@@ -6,19 +6,20 @@ export const maxDuration = 150
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
 export async function POST(request: Request) {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    return NextResponse.json({ error: 'OpenAI is not configured for this app yet. Add OPENAI_API_KEY in the project environment settings.' }, { status: 503 })
+  }
+
   try {
     const form = await request.formData()
     const audio = form.get('audio')
-    const apiKey = form.get('apiKey')
 
     if (!(audio instanceof File) || !audio.size) {
       return NextResponse.json({ error: 'Please add a video with an audio track.' }, { status: 400 })
     }
     if (audio.size > MAX_AUDIO_BYTES) {
       return NextResponse.json({ error: 'The audio is too large to transcribe. Try a shorter or smaller video.' }, { status: 413 })
-    }
-    if (typeof apiKey !== 'string' || !/^sk-[A-Za-z0-9_-]{20,}$/.test(apiKey)) {
-      return NextResponse.json({ error: 'Enter a valid OpenAI API key.' }, { status: 400 })
     }
 
     const openAiForm = new FormData()
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
     })
     const result = await response.json().catch(() => ({}))
     if (!response.ok) {
-      const message = typeof result?.error?.message === 'string' ? result.error.message : 'OpenAI could not transcribe this video. Check your API key and try again.'
+      const message = typeof result?.error?.message === 'string' ? result.error.message : 'OpenAI could not transcribe this video. Check the project API key and try again.'
       return NextResponse.json({ error: message }, { status: response.status === 401 ? 401 : 502 })
     }
     return NextResponse.json({ text: typeof result.text === 'string' ? result.text : '' })
