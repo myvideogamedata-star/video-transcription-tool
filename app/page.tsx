@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AudioLines, Check, Clipboard, FileVideo2, LoaderCircle, LockKeyhole, RotateCcw, Upload, WandSparkles } from 'lucide-react'
 import CaptionedVideoPreview from '@/components/captioned-video-preview'
 import type { CaptionResult, CaptionUnit } from '@/lib/captions'
+import { analyzeVideoFrames } from '@/lib/video-analysis'
 
 type TranscriptResponse = { text?: string; units?: CaptionUnit[]; error?: string }
 type CaptionResponse = CaptionResult & { error?: string }
@@ -32,7 +33,7 @@ export default function Home() {
   const [units, setUnits] = useState<CaptionUnit[]>([])
   const [captionResult, setCaptionResult] = useState<CaptionResult | null>(null)
   const [videoUrl, setVideoUrl] = useState('')
-  const [stage, setStage] = useState<'transcribing' | 'designing' | null>(null)
+  const [stage, setStage] = useState<'transcribing' | 'analyzing' | 'designing' | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -158,11 +159,13 @@ export default function Home() {
       }
 
       if (!nextUnits.length) throw new Error('OpenAI did not return verified speech timings. Please try again.')
+      setStage('analyzing')
+      const visualFrames = await analyzeVideoFrames(file)
       setStage('designing')
       const response = await fetch('/api/captions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: nextTranscript, units: nextUnits }),
+        body: JSON.stringify({ transcript: nextTranscript, units: nextUnits, duration, visualFrames }),
       })
       const result = await response.json() as CaptionResponse
       if (!response.ok) throw new Error(result.error || 'AI caption generation failed. Please try again.')
@@ -204,22 +207,22 @@ export default function Home() {
     <main className="page-shell">
       <header className="topbar"><a className="brand" href="#" aria-label="Vocal home"><span className="brand-icon"><AudioLines size={18} strokeWidth={2.2} /></span><span>vocal</span></a><span className="topbar-note">A little clarity from every video</span></header>
       <section className="workspace" aria-labelledby="page-title">
-        <div className="intro"><div className="eyebrow"><span className="eyebrow-dot" /> VIDEO TO CAPTIONS</div><h1 id="page-title">Your video,<br className="mobile-break" /> in motion.</h1><p className="intro-copy">Drop in a short video. OpenAI transcribes the speech, then styles animated captions timed to the real audio.</p></div>
-        <div className="steps" aria-label="Two simple steps"><span className="step active"><span>1</span> Add video</span><i /><span className="step"><span>2</span> Generate captions</span></div>
-        <section className="form-card" aria-label="Generate AI captions">
+        <div className="intro"><div className="eyebrow"><span className="eyebrow-dot" /> AI VIDEO EDITOR</div><h1 id="page-title">Your video,<br className="mobile-break" /> in motion.</h1><p className="intro-copy">OpenAI listens for the story, reads the frame, then directs a few bold moments around precise speech-timed captions.</p></div>
+        <div className="steps" aria-label="Two simple steps"><span className="step active"><span>1</span> Add video</span><i /><span className="step"><span>2</span> Generate AI edit</span></div>
+        <section className="form-card" aria-label="Generate AI video edit">
           <div className="field-group"><div className="field-heading"><span className="number">01</span><label htmlFor="video-upload">Choose a video</label></div><p className="field-help">MP4 or WebM · up to 2 minutes</p>
             <input ref={fileInput} id="video-upload" className="visually-hidden" type="file" accept="video/*" onChange={(event) => chooseFile(event.target.files?.[0])} />
             {file ? <div className="file-row"><span className="file-icon"><FileVideo2 size={20} /></span><span className="file-name"><strong>{file.name}</strong><small>{formatTime(duration ?? 0)} · {(file.size / (1024 * 1024)).toFixed(1)} MB</small></span><button className="text-button" onClick={reset} disabled={busy} aria-label="Choose a different video">Change</button></div> : <button className="upload-zone" onClick={() => fileInput.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]) }}><span className="upload-icon"><Upload size={20} /></span><span className="upload-copy"><strong>Choose a video <span>or drop it here</span></strong><small>Nothing is uploaded until you generate captions</small></span><span className="browse-label">Browse files</span></button>}
           </div>
           <div className="divider" />
-          <div className="field-group"><div className="field-heading"><span className="number">02</span><span className="step-title">AI-designed captions</span></div><p className="field-help">OpenAI chooses the words, emphasis, style, animation, and placement.</p><p className="privacy-note"><LockKeyhole size={14} aria-hidden="true" /> Your API key stays on the server. The video is used only to create its transcript.</p></div>
-          <button className="transcribe-button" onClick={generateAICaptions} disabled={!file || busy || Boolean(captionResult)}>{busy ? <><LoaderCircle className="spinner" size={18} /> {stage === 'transcribing' ? 'Transcribing your video…' : 'Designing your captions…'}</> : captionResult ? <><Check size={18} /> Captions generated</> : <><WandSparkles size={18} /> Generate AI Captions <span>→</span></>}</button>
-          <p className="time-note">Your video plays once to transcribe speech. Caption timing comes from OpenAI&apos;s verified word or phrase timestamps.</p>
+          <div className="field-group"><div className="field-heading"><span className="number">02</span><span className="step-title">AI-directed edit</span></div><p className="field-help">Headlines, clean subtitles, selective zooms, and thoughtful placement.</p><p className="privacy-note"><LockKeyhole size={14} aria-hidden="true" /> Your API key stays on the server. Sampled frames are analyzed for composition.</p></div>
+          <button className="transcribe-button" onClick={generateAICaptions} disabled={!file || busy || Boolean(captionResult)}>{busy ? <><LoaderCircle className="spinner" size={18} /> {stage === 'transcribing' ? 'Transcribing your video…' : stage === 'analyzing' ? 'Reading the video composition…' : 'Directing your AI edit…'}</> : captionResult ? <><Check size={18} /> Captions generated</> : <><WandSparkles size={18} /> Generate AI Edit <span>→</span></>}</button>
+          <p className="time-note">Speech timing comes from OpenAI&apos;s verified word or phrase timestamps. Sample frames inform the composition.</p>
           {error && <p className="error-message" role="alert">{error}</p>}
         </section>
-        {captionResult && videoUrl && <section className="caption-result" aria-labelledby="caption-result-title"><div className="caption-result-heading"><div className="result-label"><Check size={14} /> CAPTIONS READY</div><h2 id="caption-result-title">Your video, captioned</h2><p>Play your video to preview the timed captions. No timeline or extra editing.</p></div><CaptionedVideoPreview src={videoUrl} captions={captionResult} /></section>}
+        {captionResult && videoUrl && <section className="caption-result" aria-labelledby="caption-result-title"><div className="caption-result-heading"><div className="result-label"><Check size={14} /> AI EDIT READY</div><h2 id="caption-result-title">Your video, edited</h2><p>A restrained AI-directed edit: punchy headlines, subtle zooms, and precisely timed captions.</p></div><CaptionedVideoPreview src={videoUrl} captions={captionResult} /></section>}
         {transcript && <section className="result-card" aria-labelledby="transcript-title"><div className="result-heading"><div><div className="result-label"><Check size={14} /> TRANSCRIPTION COMPLETE</div><h2 id="transcript-title">Your transcript</h2></div><button className="copy-button" onClick={copyTranscript}>{copied ? <Check size={16} /> : <Clipboard size={16} />}{copied ? 'Copied' : 'Copy text'}</button></div><p className="transcript-text">{transcript}</p><button className="start-over" onClick={reset}><RotateCcw size={14} /> Transcribe another video</button></section>}
-        <footer className="page-footer"><span><LockKeyhole size={13} /> Your video isn’t saved by this app.</span><span>Speech recognition and caption design by OpenAI</span></footer>
+        <footer className="page-footer"><span><LockKeyhole size={13} /> Your video isn’t saved by this app.</span><span>Transcription and edit direction by OpenAI</span></footer>
       </section>
     </main>
   )

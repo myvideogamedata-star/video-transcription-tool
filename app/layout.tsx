@@ -3,8 +3,8 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Vocal — AI video captions',
-  description: 'Turn short videos into creator-style animated captions, synchronized to real speech timings.',
+  title: 'Vocal — AI video editor',
+  description: 'Turn short videos into cinematic AI-directed edits with real-time speech captions, kinetic headlines, and subtle zooms.',
   generator: 'v0.app',
   icons: {
     icon: [
