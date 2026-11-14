@@ -19,11 +19,6 @@ export const CaptionStyleSchema = z.object({
   animation: z.literal('pop'),
 })
 
-export const CaptionCuePlanSchema = z.object({
-  unitIndexes: z.array(z.number().int().nonnegative()).min(1).max(8),
-  highlightedUnitIndexes: z.array(z.number().int().nonnegative()).max(8),
-})
-
 export const HeadlinePlanSchema = z.object({
   text: z.string().trim().min(1).max(60),
   unitIndexes: z.array(z.number().int().nonnegative()).min(1).max(8),
@@ -36,7 +31,6 @@ export const ZoomPlanSchema = z.object({
 })
 
 export const CaptionPlanSchema = z.object({
-  captions: z.array(CaptionCuePlanSchema).min(1).max(120),
   headlines: z.array(HeadlinePlanSchema).max(12),
   zooms: z.array(ZoomPlanSchema).max(8),
 })
@@ -52,20 +46,13 @@ export const CaptionRequestSchema = z.object({
   transcript: z.string().trim().min(1).max(20_000),
   units: z.array(CaptionUnitSchema).min(1).max(1_800),
   duration: z.number().finite().positive().max(120),
-  visualFrames: z.array(VisualFrameSchema).min(1).max(4),
+  visualFrames: z.array(VisualFrameSchema).min(1).max(60),
 }).refine((request) => request.units.every((unit) => unit.end <= request.duration + 0.5), 'Speech timing extends beyond the uploaded video')
 
 export type CaptionStyle = z.infer<typeof CaptionStyleSchema>
-export type CaptionCue = {
-  start: number
-  end: number
-  units: Array<CaptionUnit & { highlighted: boolean }>
-}
 export type HeadlineCue = { start: number; end: number; text: string; placement: z.infer<typeof HeadlinePlanSchema>['placement'] }
 export type ZoomCue = { start: number; end: number; scale: number }
 export type CaptionResult = {
-  style: CaptionStyle
-  captions: CaptionCue[]
   headlines: HeadlineCue[]
   zooms: ZoomCue[]
   timingPrecision: 'word' | 'phrase'

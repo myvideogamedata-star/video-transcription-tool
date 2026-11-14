@@ -55,9 +55,7 @@ export async function analyzeVideoFrames(file: File): Promise<VisualFrame[]> {
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale))
     const context = canvas.getContext('2d', { willReadFrequently: true })
     if (!context) throw new Error('This browser cannot analyze video frames.')
-    const sampleTimes = [...new Set([0.15, video.duration * 0.5, Math.max(0.15, video.duration - 0.2)])]
-      .filter((time) => time < video.duration)
-      .slice(0, 3)
+    const sampleTimes = Array.from({ length: Math.min(60, Math.ceil(video.duration / 2)) }, (_, index) => Math.min(video.duration - 0.05, 0.15 + index * 2))
     const frames: VisualFrame[] = []
 
     for (const time of sampleTimes) {
@@ -116,7 +114,7 @@ async function analyzeFramesWithoutModels(video: HTMLVideoElement): Promise<Visu
   canvas.height = Math.max(1, Math.round(video.videoHeight * scale))
   const context = canvas.getContext('2d')
   if (!context) throw new Error('Could not analyze the video composition. Try a supported browser.')
-  const times = [...new Set([0.15, video.duration * 0.5, Math.max(0.15, video.duration - 0.2)])].filter((time) => time < video.duration).slice(0, 3)
+  const times = Array.from({ length: Math.min(60, Math.ceil(video.duration / 2)) }, (_, index) => Math.min(video.duration - 0.05, 0.15 + index * 2))
   const frames: VisualFrame[] = []
   for (const time of times) {
     await seek(video, time)

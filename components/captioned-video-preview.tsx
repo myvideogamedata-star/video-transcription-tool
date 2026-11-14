@@ -6,7 +6,7 @@ import { FaceLandmarker, FilesetResolver, ImageSegmenter } from '@mediapipe/task
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
 import type { CaptionResult } from '@/lib/captions'
 
-type CaptionedVideoPreviewProps = { src: string; captions: CaptionResult }
+type CaptionedVideoPreviewProps = { src: string; edit: CaptionResult }
 
 const yellow = '#ffe22b'
 const MAX_PREVIEW_WIDTH = 1280
@@ -38,12 +38,7 @@ function activeCue<T extends { start: number; end: number }>(cues: T[], time: nu
   return cues.find((cue) => time >= cue.start && time < cue.end)
 }
 
-function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
-  context.beginPath()
-  context.roundRect(x, y, width, height, radius)
-}
-
-export default function CaptionedVideoPreview({ src, captions }: CaptionedVideoPreviewProps) {
+export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [ready, setReady] = useState(false)
@@ -108,7 +103,7 @@ export default function CaptionedVideoPreview({ src, captions }: CaptionedVideoP
       const height = Math.max(1, Math.round(video.videoHeight * scale))
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height }
       const time = video.currentTime
-      const zoom = activeCue(captions.zooms, time)
+      const zoom = activeCue(edit.zooms, time)
       const face = faceBoxRef.current
       const pivotX = face ? (face.x + face.width / 2) * width : width / 2
       const pivotY = face ? (face.y + face.height / 2) * height : height / 2
@@ -177,7 +172,7 @@ export default function CaptionedVideoPreview({ src, captions }: CaptionedVideoP
         }
       }
 
-      const headline = activeCue(captions.headlines, time)
+      const headline = activeCue(edit.headlines, time)
       const behindSubject = headline?.placement === 'behind-subject' && foregroundRef.current
       if (headline) {
         const isBehind = Boolean(behindSubject)
@@ -229,46 +224,6 @@ export default function CaptionedVideoPreview({ src, captions }: CaptionedVideoP
         context.restore()
       }
 
-      const caption = activeCue(captions.captions, time)
-      if (caption) {
-        const fontSize = Math.max(15, Math.min(width * 0.038, height * 0.056))
-        context.save()
-        context.font = `800 ${fontSize}px Arial, sans-serif`
-        context.textAlign = 'center'
-        context.textBaseline = 'middle'
-        const maxTextWidth = width * 0.86
-        const lines: Array<Array<{ text: string; highlighted: boolean }>> = []
-        let line: typeof caption.units = []
-        for (const unit of caption.units) {
-          const next = [...line, unit]
-          if (line.length && context.measureText(next.map((item) => item.text).join(' ')).width > maxTextWidth) { lines.push(line); line = [unit] }
-          else line = next
-        }
-        if (line.length) lines.push(line)
-        const lineHeight = fontSize * 1.35
-        const y = height * 0.89 - ((lines.length - 1) * lineHeight) / 2
-        const widest = Math.min(maxTextWidth, Math.max(...lines.map((items) => context.measureText(items.map((item) => item.text).join(' ')).width)))
-        const plateX = (width - widest) / 2 - fontSize * 0.5
-        const plateY = y - lineHeight * (lines.length - 1) / 2 - fontSize * 0.62
-        context.fillStyle = 'rgba(0,0,0,.46)'
-        roundedRect(context, plateX, plateY, widest + fontSize, lineHeight * lines.length + fontSize * 0.25, fontSize * 0.3)
-        context.fill()
-        lines.forEach((items, lineIndex) => {
-          const text = items.map((item) => item.text).join(' ')
-          let x = (width - context.measureText(text).width) / 2
-          const baseline = y + lineIndex * lineHeight
-          for (const [index, unit] of items.entries()) {
-            const part = `${unit.text}${index < items.length - 1 ? ' ' : ''}`
-            context.textAlign = 'left'
-            context.fillStyle = unit.highlighted ? yellow : '#fff'
-            context.shadowColor = 'rgba(0,0,0,.7)'
-            context.shadowBlur = 3
-            context.fillText(part, x, baseline)
-            x += context.measureText(part).width
-          }
-        })
-        context.restore()
-      }
       if (now - lastUiUpdate.current > 120) {
         lastUiUpdate.current = now
         setCurrentTime(time)
@@ -294,7 +249,7 @@ export default function CaptionedVideoPreview({ src, captions }: CaptionedVideoP
       segmenter?.close()
       faceLandmarker?.close()
     }
-  }, [captions])
+  }, [edit])
 
   async function exportVideo() {
     const video = videoRef.current
@@ -366,7 +321,7 @@ export default function CaptionedVideoPreview({ src, captions }: CaptionedVideoP
     }
   }
 
-  const activeHeadline = activeCue(captions.headlines, currentTime)
+  const activeHeadline = activeCue(edit.headlines, currentTime)
 
   return (
     <section className="video-preview-card" aria-label="AI-edited video preview">
