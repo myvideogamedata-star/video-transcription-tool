@@ -1,9 +1,12 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AudioLines, Check, Clipboard, FileVideo2, LoaderCircle, LockKeyhole, RotateCcw, Upload, WandSparkles } from 'lucide-react'
+import CaptionedVideoPreview from '@/components/captioned-video-preview'
+import type { CaptionResult, CaptionUnit } from '@/lib/captions'
 
-type TranscriptResponse = { text?: string; error?: string }
+type TranscriptResponse = { text?: string; units?: CaptionUnit[]; error?: string }
+type CaptionResponse = CaptionResult & { error?: string }
 
 const MAX_DURATION = 120
 const MAX_FILE_SIZE = 100 * 1024 * 1024
@@ -26,14 +29,32 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null)
   const [duration, setDuration] = useState<number | null>(null)
   const [transcript, setTranscript] = useState('')
+  const [units, setUnits] = useState<CaptionUnit[]>([])
+  const [captionResult, setCaptionResult] = useState<CaptionResult | null>(null)
+  const [videoUrl, setVideoUrl] = useState('')
+  const [stage, setStage] = useState<'transcribing' | 'designing' | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!file) {
+      setVideoUrl('')
+      return
+    }
+    const url = URL.createObjectURL(file)
+    setVideoUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
 
   function chooseFile(next: File | undefined) {
     if (!next) return
     setError('')
     setTranscript('')
+    setUnits([])
+    setCaptionResult(null)
+    setFile(null)
+    setDuration(null)
     if (!next.type.startsWith('video/')) {
       setError('Choose a video file to get started.')
       return
@@ -66,76 +87,99 @@ export default function Home() {
     probe.src = url
   }
 
-  async function transcribe() {
+  async function generateAICaptions() {
     if (!file || busy) return
     setError('')
-    setTranscript('')
     setBusy(true)
 
-    const video = document.createElement('video')
-    const videoUrl = URL.createObjectURL(file)
+    let nextTranscript = transcript
+    let nextUnits = units
+    let video: HTMLVideoElement | undefined
+    let audioUrl: string | undefined
     let audioContext: AudioContext | undefined
     let recorder: MediaRecorder | undefined
     let stopTimer: ReturnType<typeof setTimeout> | undefined
 
     try {
-      if (!('captureStream' in video)) throw new Error('Audio capture isn’t supported in this browser. Try the latest Chrome or Edge.')
-      video.className = 'hidden-video'
-      video.preload = 'auto'
-      video.playsInline = true
-      document.body.appendChild(video)
-      const metadataReady = waitForVideoEvent(video, 'loadedmetadata')
-      const playbackReady = waitForVideoEvent(video, 'canplay')
-      video.src = videoUrl
-      await Promise.all([metadataReady, playbackReady])
+      if (!nextTranscript || !nextUnits.length) {
+        setStage('transcribing')
+        video = document.createElement('video')
+        audioUrl = URL.createObjectURL(file)
+        if (!('captureStream' in video)) throw new Error('Audio capture isn’t supported in this browser. Try the latest Chrome or Edge.')
+        video.className = 'hidden-video'
+        video.preload = 'auto'
+        video.playsInline = true
+        document.body.appendChild(video)
+        const metadataReady = waitForVideoEvent(video, 'loadedmetadata')
+        const playbackReady = waitForVideoEvent(video, 'canplay')
+        video.src = audioUrl
+        await Promise.all([metadataReady, playbackReady])
 
-      const stream = (video as HTMLVideoElement & { captureStream: () => MediaStream }).captureStream()
-      if (stream.getAudioTracks().length === 0) throw new Error('No audio track was found in this video.')
+        const stream = (video as HTMLVideoElement & { captureStream: () => MediaStream }).captureStream()
+        if (stream.getAudioTracks().length === 0) throw new Error('No audio track was found in this video.')
 
-      audioContext = new AudioContext()
-      await audioContext.resume()
-      const source = audioContext.createMediaStreamSource(stream)
-      const destination = audioContext.createMediaStreamDestination()
-      source.connect(destination)
+        audioContext = new AudioContext()
+        await audioContext.resume()
+        const source = audioContext.createMediaStreamSource(stream)
+        const destination = audioContext.createMediaStreamDestination()
+        source.connect(destination)
 
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
-      recorder = new MediaRecorder(destination.stream, { mimeType })
-      const chunks: BlobPart[] = []
-      const recording = new Promise<Blob>((resolve, reject) => {
-        recorder!.addEventListener('dataavailable', (event) => { if (event.data.size) chunks.push(event.data) })
-        recorder!.addEventListener('stop', () => resolve(new Blob(chunks, { type: 'audio/webm' })), { once: true })
-        recorder!.addEventListener('error', () => reject(new Error('Audio capture failed. Please try again.')), { once: true })
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
+        recorder = new MediaRecorder(destination.stream, { mimeType })
+        const chunks: BlobPart[] = []
+        const recording = new Promise<Blob>((resolve, reject) => {
+          recorder!.addEventListener('dataavailable', (event) => { if (event.data.size) chunks.push(event.data) })
+          recorder!.addEventListener('stop', () => resolve(new Blob(chunks, { type: 'audio/webm' })), { once: true })
+          recorder!.addEventListener('error', () => reject(new Error('Audio capture failed. Please try again.')), { once: true })
+        })
+        const playback = new Promise<void>((resolve, reject) => {
+          video!.addEventListener('ended', () => resolve(), { once: true })
+          video!.addEventListener('error', () => reject(new Error('Video playback stopped unexpectedly. Please try again.')), { once: true })
+          stopTimer = setTimeout(() => reject(new Error('Video playback took too long. Please try again.')), (duration ?? MAX_DURATION) * 1000 + 15_000)
+        })
+
+        recorder.start()
+        await video.play()
+        await playback
+        if (recorder.state === 'recording') recorder.stop()
+        const audio = await recording
+        if (!audio.size) throw new Error('No audio could be captured from this video.')
+
+        const form = new FormData()
+        form.append('audio', audio, 'video-audio.webm')
+        const response = await fetch('/api/transcribe', { method: 'POST', body: form })
+        const result = await response.json() as TranscriptResponse
+        if (!response.ok) throw new Error(result.error || 'Transcription failed. Please try again.')
+        if (!result.text?.trim()) throw new Error('No speech was detected in this video.')
+        nextTranscript = result.text
+        nextUnits = result.units ?? []
+        setTranscript(nextTranscript)
+        setUnits(nextUnits)
+      }
+
+      if (!nextUnits.length) throw new Error('OpenAI did not return verified speech timings. Please try again.')
+      setStage('designing')
+      const response = await fetch('/api/captions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: nextTranscript, units: nextUnits }),
       })
-      const playback = new Promise<void>((resolve, reject) => {
-        video.addEventListener('ended', () => resolve(), { once: true })
-        video.addEventListener('error', () => reject(new Error('Video playback stopped unexpectedly. Please try again.')), { once: true })
-        stopTimer = setTimeout(() => reject(new Error('Video playback took too long. Please try again.')), (duration ?? MAX_DURATION) * 1000 + 15_000)
-      })
-
-      recorder.start()
-      await video.play()
-      await playback
-      if (recorder.state === 'recording') recorder.stop()
-      const audio = await recording
-      if (!audio.size) throw new Error('No audio could be captured from this video.')
-
-      const form = new FormData()
-      form.append('audio', audio, 'video-audio.webm')
-      const response = await fetch('/api/transcribe', { method: 'POST', body: form })
-      const result = await response.json() as TranscriptResponse
-      if (!response.ok) throw new Error(result.error || 'Transcription failed. Please try again.')
-      if (!result.text?.trim()) throw new Error('No speech was detected in this video.')
-      setTranscript(result.text)
+      const result = await response.json() as CaptionResponse
+      if (!response.ok) throw new Error(result.error || 'AI caption generation failed. Please try again.')
+      setCaptionResult(result)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Something went wrong. Please try again.')
     } finally {
       if (stopTimer) clearTimeout(stopTimer)
       if (recorder?.state === 'recording') recorder.stop()
-      video.pause()
-      video.src = ''
-      video.remove()
-      URL.revokeObjectURL(videoUrl)
+      if (video) {
+        video.pause()
+        video.src = ''
+        video.remove()
+      }
+      if (audioUrl) URL.revokeObjectURL(audioUrl)
       if (audioContext && audioContext.state !== 'closed') await audioContext.close()
+      setStage(null)
       setBusy(false)
     }
   }
@@ -150,6 +194,8 @@ export default function Home() {
     setFile(null)
     setDuration(null)
     setTranscript('')
+    setUnits([])
+    setCaptionResult(null)
     setError('')
     if (fileInput.current) fileInput.current.value = ''
   }
@@ -158,21 +204,22 @@ export default function Home() {
     <main className="page-shell">
       <header className="topbar"><a className="brand" href="#" aria-label="Vocal home"><span className="brand-icon"><AudioLines size={18} strokeWidth={2.2} /></span><span>vocal</span></a><span className="topbar-note">A little clarity from every video</span></header>
       <section className="workspace" aria-labelledby="page-title">
-        <div className="intro"><div className="eyebrow"><span className="eyebrow-dot" /> VIDEO TO TEXT</div><h1 id="page-title">Your video,<br className="mobile-break" /> in words.</h1><p className="intro-copy">Drop in a short video and get a clear, ready-to-use transcript. No editing timeline, no fuss.</p></div>
-        <div className="steps" aria-label="Two simple steps"><span className="step active"><span>1</span> Add video</span><i /><span className="step"><span>2</span> Get transcript</span></div>
-        <section className="form-card" aria-label="Transcribe a video">
+        <div className="intro"><div className="eyebrow"><span className="eyebrow-dot" /> VIDEO TO CAPTIONS</div><h1 id="page-title">Your video,<br className="mobile-break" /> in motion.</h1><p className="intro-copy">Drop in a short video. OpenAI transcribes the speech, then styles animated captions timed to the real audio.</p></div>
+        <div className="steps" aria-label="Two simple steps"><span className="step active"><span>1</span> Add video</span><i /><span className="step"><span>2</span> Generate captions</span></div>
+        <section className="form-card" aria-label="Generate AI captions">
           <div className="field-group"><div className="field-heading"><span className="number">01</span><label htmlFor="video-upload">Choose a video</label></div><p className="field-help">MP4 or WebM · up to 2 minutes</p>
             <input ref={fileInput} id="video-upload" className="visually-hidden" type="file" accept="video/*" onChange={(event) => chooseFile(event.target.files?.[0])} />
-            {file ? <div className="file-row"><span className="file-icon"><FileVideo2 size={20} /></span><span className="file-name"><strong>{file.name}</strong><small>{formatTime(duration ?? 0)} · {(file.size / (1024 * 1024)).toFixed(1)} MB</small></span><button className="text-button" onClick={reset} disabled={busy} aria-label="Choose a different video">Change</button></div> : <button className="upload-zone" onClick={() => fileInput.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]) }}><span className="upload-icon"><Upload size={20} /></span><span className="upload-copy"><strong>Choose a video <span>or drop it here</span></strong><small>Nothing is uploaded until you transcribe</small></span><span className="browse-label">Browse files</span></button>}
+            {file ? <div className="file-row"><span className="file-icon"><FileVideo2 size={20} /></span><span className="file-name"><strong>{file.name}</strong><small>{formatTime(duration ?? 0)} · {(file.size / (1024 * 1024)).toFixed(1)} MB</small></span><button className="text-button" onClick={reset} disabled={busy} aria-label="Choose a different video">Change</button></div> : <button className="upload-zone" onClick={() => fileInput.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]) }}><span className="upload-icon"><Upload size={20} /></span><span className="upload-copy"><strong>Choose a video <span>or drop it here</span></strong><small>Nothing is uploaded until you generate captions</small></span><span className="browse-label">Browse files</span></button>}
           </div>
           <div className="divider" />
-          <div className="field-group"><div className="field-heading"><span className="number">02</span><span className="step-title">Transcribe with OpenAI</span></div><p className="field-help">Your OpenAI key is securely configured for this app.</p><p className="privacy-note"><LockKeyhole size={14} aria-hidden="true" /> Your API key stays on the server and is never shown or saved in your browser.</p></div>
-          <button className="transcribe-button" onClick={transcribe} disabled={!file || busy}>{busy ? <><LoaderCircle className="spinner" size={18} /> Listening to your video…</> : <><WandSparkles size={18} /> Transcribe video <span>→</span></>}</button>
-          <p className="time-note">Your video plays once while the audio is prepared, then OpenAI transcribes it.</p>
+          <div className="field-group"><div className="field-heading"><span className="number">02</span><span className="step-title">AI-designed captions</span></div><p className="field-help">OpenAI chooses the words, emphasis, style, animation, and placement.</p><p className="privacy-note"><LockKeyhole size={14} aria-hidden="true" /> Your API key stays on the server. The video is used only to create its transcript.</p></div>
+          <button className="transcribe-button" onClick={generateAICaptions} disabled={!file || busy || Boolean(captionResult)}>{busy ? <><LoaderCircle className="spinner" size={18} /> {stage === 'transcribing' ? 'Transcribing your video…' : 'Designing your captions…'}</> : captionResult ? <><Check size={18} /> Captions generated</> : <><WandSparkles size={18} /> Generate AI Captions <span>→</span></>}</button>
+          <p className="time-note">Your video plays once to transcribe speech. Caption timing comes from OpenAI&apos;s verified word or phrase timestamps.</p>
           {error && <p className="error-message" role="alert">{error}</p>}
         </section>
+        {captionResult && videoUrl && <section className="caption-result" aria-labelledby="caption-result-title"><div className="caption-result-heading"><div className="result-label"><Check size={14} /> CAPTIONS READY</div><h2 id="caption-result-title">Your video, captioned</h2><p>Play your video to preview the timed captions. No timeline or extra editing.</p></div><CaptionedVideoPreview src={videoUrl} captions={captionResult} /></section>}
         {transcript && <section className="result-card" aria-labelledby="transcript-title"><div className="result-heading"><div><div className="result-label"><Check size={14} /> TRANSCRIPTION COMPLETE</div><h2 id="transcript-title">Your transcript</h2></div><button className="copy-button" onClick={copyTranscript}>{copied ? <Check size={16} /> : <Clipboard size={16} />}{copied ? 'Copied' : 'Copy text'}</button></div><p className="transcript-text">{transcript}</p><button className="start-over" onClick={reset}><RotateCcw size={14} /> Transcribe another video</button></section>}
-        <footer className="page-footer"><span><LockKeyhole size={13} /> Your video isn’t saved by this app.</span><span>Powered by OpenAI speech recognition</span></footer>
+        <footer className="page-footer"><span><LockKeyhole size={13} /> Your video isn’t saved by this app.</span><span>Speech recognition and caption design by OpenAI</span></footer>
       </section>
     </main>
   )
