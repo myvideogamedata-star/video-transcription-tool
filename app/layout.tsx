@@ -3,8 +3,8 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Vocal — Video to transcript',
-  description: 'Turn videos under two minutes into clear transcripts with OpenAI speech recognition.',
+  title: 'Vocal — AI video editor',
+  description: 'VocalAgents Creative Runtime turns verified speech timing and video context into expressive, GPT-directed motion graphics.',
   generator: 'v0.app',
   icons: {
     icon: [
