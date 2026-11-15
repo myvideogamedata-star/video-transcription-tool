@@ -294,7 +294,7 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
       }
 
       const maskAvailable = Boolean(foregroundRef.current)
-      const behindLayers = activeEdit.layers.filter((layer) => layer.depth === 'behind-subject' && layer.kind === 'headline' && maskAvailable)
+      const behindLayers = activeEdit.layers.filter((layer) => layer.depth === 'behind-subject' && maskAvailable)
       const foregroundLayers = activeEdit.layers.filter((layer) => !behindLayers.includes(layer))
 
       if (behindLayers.length && foregroundRef.current) {
