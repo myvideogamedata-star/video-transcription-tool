@@ -139,7 +139,17 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
   const [exporting, setExporting] = useState(false)
   const [exportMessage, setExportMessage] = useState('')
   const [currentTime, setCurrentTime] = useState(0)
+  const [workingEdit, setWorkingEdit] = useState(edit)
+  const editRef = useRef(edit)
   const lastUiUpdate = useRef(0)
+
+  useEffect(() => {
+    setWorkingEdit(edit)
+  }, [edit])
+
+  useEffect(() => {
+    editRef.current = workingEdit
+  }, [workingEdit])
   const [visualStatus, setVisualStatus] = useState<'loading' | 'ready' | 'fallback'>('loading')
   const foregroundRef = useRef<HTMLCanvasElement | null>(null)
   const faceBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
@@ -193,12 +203,13 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
     const draw = (now: number) => {
       frame = requestAnimationFrame(draw)
       if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) return
+      const activeEdit = editRef.current
       const scale = Math.min(1, MAX_PREVIEW_WIDTH / video.videoWidth)
       const width = Math.max(1, Math.round(video.videoWidth * scale))
       const height = Math.max(1, Math.round(video.videoHeight * scale))
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height }
       const time = video.currentTime
-      const zoom = activeCue(edit.zooms, time)
+      const zoom = activeCue(activeEdit.zooms, time)
       const face = faceBoxRef.current
       const pivotX = face ? (face.x + face.width / 2) * width : width / 2
       const pivotY = face ? (face.y + face.height / 2) * height : height / 2
@@ -274,8 +285,8 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
       }
 
       const maskAvailable = Boolean(foregroundRef.current)
-      const behindLayers = edit.layers.filter((layer) => layer.depth === 'behind-subject' && maskAvailable)
-      const foregroundLayers = edit.layers.filter((layer) => layer.depth !== 'behind-subject' || !maskAvailable)
+      const behindLayers = activeEdit.layers.filter((layer) => layer.depth === 'behind-subject' && maskAvailable)
+      const foregroundLayers = activeEdit.layers.filter((layer) => layer.depth !== 'behind-subject' || !maskAvailable)
 
       behindLayers.forEach((layer) => drawMotionLayer(context, layer, time, width, height))
 
@@ -315,7 +326,7 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
       segmenter?.close()
       faceLandmarker?.close()
     }
-  }, [edit])
+  }, [])
 
   async function exportVideo() {
     const video = videoRef.current
@@ -387,8 +398,17 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
     }
   }
 
-  const activeLayer = activeCue(edit.layers, currentTime)
-  const activeSpokenWord = edit.layers.find((layer) => layer.kind === 'caption' && layer.words.some((word) => currentTime >= word.start && currentTime < word.end))?.words.find((word) => currentTime >= word.start && currentTime < word.end)
+  const activeLayer = activeCue(workingEdit.layers, currentTime)
+  const activeSpokenWord = workingEdit.layers.find((layer) => layer.kind === 'caption' && layer.words.some((word) => currentTime >= word.start && currentTime < word.end))?.words.find((word) => currentTime >= word.start && currentTime < word.end)
+  const [selectedLayerId, setSelectedLayerId] = useState(edit.layers[0]?.id ?? '')
+
+  function updateLayer(layerId: string, update: (layer: MotionTextLayer) => MotionTextLayer) {
+    setWorkingEdit((current) => ({ ...current, layers: current.layers.map((layer) => layer.id === layerId ? update(layer) : layer) }))
+  }
+
+  function updateZoom(index: number, scale: number) {
+    setWorkingEdit((current) => ({ ...current, zooms: current.zooms.map((zoom, zoomIndex) => zoomIndex === index ? { ...zoom, scale } : zoom) }))
+  }
 
   return (
     <section className="video-preview-card" aria-label="AI-edited video preview">
@@ -407,7 +427,7 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
         <span className={`vision-status vision-status-${visualStatus}`}><i />{visualStatus === 'ready' ? 'Subject tracking active' : visualStatus === 'loading' ? 'Loading subject tracking…' : 'Using clean text placement'}</span>
         <button type="button" className="export-button" onClick={exportVideo} disabled={!ready || exporting}><Download size={15} />{exporting ? 'Rendering…' : 'Download video'}</button>
       </div>
-      <CreativeRuntimeInspector edit={edit} currentTime={currentTime} onSeek={(time) => { if (videoRef.current) videoRef.current.currentTime = time }} />
+      <CreativeRuntimeInspector edit={workingEdit} currentTime={currentTime} selectedLayerId={selectedLayerId} onSelectLayer={setSelectedLayerId} onUpdateLayer={updateLayer} onUpdateZoom={updateZoom} onSeek={(time) => { if (videoRef.current) videoRef.current.currentTime = time }} />
       {activeSpokenWord && <p className="sr-only" aria-live="polite">Caption: {activeSpokenWord.text}</p>}
       {activeLayer?.kind === 'headline' && <p className="sr-only" aria-live="polite">Headline: {activeLayer.words.map((word) => word.text).join(' ')}</p>}
       <p className="caption-preview-note">The Creative Runtime composes editable text layers from your transcript, then renders the same scene graph for preview and export.</p>
