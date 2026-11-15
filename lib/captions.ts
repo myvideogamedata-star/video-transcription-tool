@@ -9,26 +9,34 @@ export const CaptionUnitSchema = z.object({
 
 export type CaptionUnit = z.infer<typeof CaptionUnitSchema>
 
-export const CaptionStyleSchema = z.object({
-  fontFamily: z.literal('sans'),
-  fontSize: z.literal('large'),
-  textColor: z.literal('white'),
-  highlightColor: z.literal('lemon'),
-  background: z.literal('none'),
-  position: z.literal('bottom'),
-  animation: z.literal('pop'),
+const WordStyleSchema = z.object({
+  unitIndex: z.number().int().nonnegative(),
+  fontFamily: z.enum(['sans', 'condensed', 'serif', 'mono', 'rounded']).optional(),
+  fontScale: z.number().min(0.65).max(2.5).optional(),
+  fontWeight: z.number().int().min(400).max(900).optional(),
+  color: z.string().regex(/^#[\da-fA-F]{6}$/).optional(),
+  italic: z.boolean().optional(),
+  uppercase: z.boolean().optional(),
 })
 
-export const HeadlinePlanSchema = z.object({
-  text: z.string().trim().min(1).max(60),
-  unitIndexes: z.array(z.number().int().nonnegative()).min(1).max(8),
-  placement: z.enum(['upper', 'above-head', 'behind-subject']),
-})
-
-export const CaptionGroupPlanSchema = z.object({
-  unitIndexes: z.array(z.number().int().nonnegative()).min(1).max(8),
-  style: z.enum(['impact', 'editorial', 'kinetic']),
-  placement: z.enum(['upper', 'above-head', 'behind-subject']),
+const CreativeLayerSchema = z.object({
+  kind: z.enum(['caption', 'headline']),
+  unitIndexes: z.array(z.number().int().nonnegative()).min(1).max(12),
+  text: z.string().trim().max(60).optional(),
+  x: z.number().min(0.05).max(0.95),
+  y: z.number().min(0.05).max(0.95),
+  width: z.number().min(0.2).max(0.96),
+  align: z.enum(['left', 'center', 'right']),
+  depth: z.enum(['foreground', 'behind-subject']),
+  fontFamily: z.enum(['sans', 'condensed', 'serif', 'mono', 'rounded']),
+  fontScale: z.number().min(0.025).max(0.22),
+  fontWeight: z.number().int().min(400).max(900),
+  color: z.string().regex(/^#[\da-fA-F]{6}$/),
+  italic: z.boolean(),
+  uppercase: z.boolean(),
+  background: z.enum(['none', 'pill', 'marker']),
+  motion: z.enum(['none', 'fade', 'rise', 'pop', 'slide']),
+  wordStyles: z.array(WordStyleSchema).max(12),
 })
 
 export const ZoomPlanSchema = z.object({
@@ -37,8 +45,7 @@ export const ZoomPlanSchema = z.object({
 })
 
 export const CaptionPlanSchema = z.object({
-  captions: z.array(CaptionGroupPlanSchema).max(140),
-  headlines: z.array(HeadlinePlanSchema).max(12),
+  layers: z.array(CreativeLayerSchema).max(180),
   zooms: z.array(ZoomPlanSchema).max(8),
 })
 
@@ -56,19 +63,42 @@ export const CaptionRequestSchema = z.object({
   visualFrames: z.array(VisualFrameSchema).min(1).max(60),
 }).refine((request) => request.units.every((unit) => unit.end <= request.duration + 0.5), 'Speech timing extends beyond the uploaded video')
 
-export type CaptionStyle = z.infer<typeof CaptionStyleSchema>
-export type HeadlineCue = { start: number; end: number; text: string; placement: z.infer<typeof HeadlinePlanSchema>['placement'] }
-export type MotionCaptionCue = {
+export type TextFont = 'sans' | 'condensed' | 'serif' | 'mono' | 'rounded'
+export type TextMotion = 'none' | 'fade' | 'rise' | 'pop' | 'slide'
+export type MotionWord = {
+  text: string
   start: number
   end: number
-  words: { text: string; start: number; end: number }[]
-  style: z.infer<typeof CaptionGroupPlanSchema>['style']
-  placement: z.infer<typeof CaptionGroupPlanSchema>['placement']
+  fontFamily: TextFont
+  fontScale: number
+  fontWeight: number
+  color: string
+  italic: boolean
+  uppercase: boolean
+}
+export type MotionTextLayer = {
+  id: string
+  kind: 'caption' | 'headline'
+  start: number
+  end: number
+  words: MotionWord[]
+  x: number
+  y: number
+  width: number
+  align: 'left' | 'center' | 'right'
+  depth: 'foreground' | 'behind-subject'
+  fontFamily: TextFont
+  fontScale: number
+  fontWeight: number
+  color: string
+  italic: boolean
+  uppercase: boolean
+  background: 'none' | 'pill' | 'marker'
+  motion: TextMotion
 }
 export type ZoomCue = { start: number; end: number; scale: number }
 export type CaptionResult = {
-  captions: MotionCaptionCue[]
-  headlines: HeadlineCue[]
+  layers: MotionTextLayer[]
   zooms: ZoomCue[]
   timingPrecision: 'word' | 'phrase'
   segmentationAvailable: boolean

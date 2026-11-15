@@ -4,12 +4,105 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Download, Pause, Play } from 'lucide-react'
 import { FaceLandmarker, FilesetResolver, ImageSegmenter } from '@mediapipe/tasks-vision'
 import { fetchFile, toBlobURL } from '@ffmpeg/util'
-import type { CaptionResult } from '@/lib/captions'
+import type { CaptionResult, MotionTextLayer, MotionWord } from '@/lib/captions'
+import CreativeRuntimeInspector from '@/components/creative-runtime-inspector'
 
 type CaptionedVideoPreviewProps = { src: string; edit: CaptionResult }
 
-const yellow = '#ffe22b'
 const MAX_PREVIEW_WIDTH = 1280
+const fontStacks = {
+  sans: 'Arial, Helvetica, sans-serif',
+  condensed: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif',
+  serif: 'Georgia, "Times New Roman", serif',
+  mono: '"Courier New", monospace',
+  rounded: 'Trebuchet MS, Arial, sans-serif',
+} satisfies Record<MotionWord['fontFamily'], string>
+
+function drawMotionLayer(context: CanvasRenderingContext2D, layer: MotionTextLayer, time: number, width: number, height: number) {
+  if (time < layer.start || time >= layer.end) return
+  const elapsed = Math.max(0, Math.min(1, (time - layer.start) / 0.16))
+  const activeWord = layer.kind === 'caption' ? layer.words.find((word) => time >= word.start && time < word.end) : undefined
+  const fontSize = (word: MotionWord) => Math.max(14, Math.min(height * 0.34, height * word.fontScale))
+  const font = (word: MotionWord) => `${word.italic ? 'italic ' : ''}${word.fontWeight} ${fontSize(word)}px ${fontStacks[word.fontFamily]}`
+  const gap = height * 0.012
+  const maxWidth = width * layer.width
+  const lines: { words: { word: MotionWord; width: number; active: boolean }[]; width: number; height: number }[] = []
+  let line: typeof lines[number] = { words: [], width: 0, height: 0 }
+
+  for (const word of layer.words) {
+    context.font = font(word)
+    const label = word.uppercase ? word.text.toLocaleUpperCase() : word.text
+    const wordWidth = context.measureText(label).width
+    const wordGap = line.words.length ? gap : 0
+    if (line.words.length && line.width + wordGap + wordWidth > maxWidth) {
+      lines.push(line)
+      line = { words: [], width: 0, height: 0 }
+    }
+    const nextGap = line.words.length ? gap : 0
+    line.words.push({ word: { ...word, text: label }, width: wordWidth, active: word === activeWord })
+    line.width += nextGap + wordWidth
+    line.height = Math.max(line.height, fontSize(word) * 1.16)
+  }
+  if (line.words.length) lines.push(line)
+
+  const totalHeight = lines.reduce((sum, item) => sum + item.height, 0)
+  const animationY = layer.motion === 'rise' ? (1 - elapsed) * height * 0.035 : 0
+  const animationX = layer.motion === 'slide' ? (1 - elapsed) * width * 0.07 : 0
+  const animationScale = layer.motion === 'pop' ? 0.92 + elapsed * 0.08 : 1
+  const animationAlpha = layer.motion === 'fade' ? elapsed : 1
+  const anchorX = layer.x * width + animationX
+  const anchorY = layer.y * height + animationY
+  const boxLeft = anchorX - maxWidth / 2
+  let cursorY = anchorY - totalHeight / 2
+
+  context.save()
+  context.globalAlpha = animationAlpha
+  context.translate(anchorX, anchorY)
+  context.scale(animationScale, animationScale)
+  context.translate(-anchorX, -anchorY)
+
+  if (layer.background !== 'none') {
+    const paddingX = height * 0.018
+    const paddingY = height * 0.009
+    context.fillStyle = layer.background === 'pill' ? 'rgba(9, 13, 17, .76)' : 'rgba(210, 255, 56, .78)'
+    for (const item of lines) {
+      const x = layer.align === 'left' ? boxLeft : layer.align === 'right' ? boxLeft + maxWidth - item.width : anchorX - item.width / 2
+      const radius = layer.background === 'pill' ? item.height * 0.28 : item.height * 0.08
+      context.beginPath()
+      context.roundRect(x - paddingX, cursorY - paddingY, item.width + paddingX * 2, item.height + paddingY * 2, radius)
+      context.fill()
+      cursorY += item.height
+    }
+    cursorY = anchorY - totalHeight / 2
+  }
+
+  context.textBaseline = 'middle'
+  context.lineJoin = 'round'
+  for (const item of lines) {
+    let cursorX = layer.align === 'left' ? boxLeft : layer.align === 'right' ? boxLeft + maxWidth - item.width : anchorX - item.width / 2
+    for (const entry of item.words) {
+      const size = fontSize(entry.word)
+      const pop = entry.active && layer.motion === 'pop' ? 1.08 : 1
+      context.save()
+      context.translate(cursorX + entry.width / 2, cursorY + item.height / 2)
+      context.scale(pop, pop)
+      context.font = font(entry.word)
+      context.textAlign = 'center'
+      context.strokeStyle = 'rgba(8, 10, 12, .76)'
+      context.lineWidth = Math.max(1.5, size * 0.075)
+      context.shadowColor = 'rgba(0, 0, 0, .5)'
+      context.shadowBlur = size * 0.16
+      context.shadowOffsetY = size * 0.05
+      context.strokeText(entry.word.text, 0, 0)
+      context.fillStyle = entry.word.color
+      context.fillText(entry.word.text, 0, 0)
+      context.restore()
+      cursorX += entry.width + gap
+    }
+    cursorY += item.height
+  }
+  context.restore()
+}
 
 type FFmpegInstance = {
   load(config: { classWorkerURL: string; coreURL: string; wasmURL: string }): Promise<boolean>
@@ -180,107 +273,13 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
         }
       }
 
-      const headline = activeCue(edit.headlines, time)
-      const caption = activeCue(edit.captions, time)
       const maskAvailable = Boolean(foregroundRef.current)
-      const headlineBehind = Boolean(maskAvailable && headline?.placement === 'behind-subject')
-      const captionBehind = Boolean(maskAvailable && caption?.placement === 'behind-subject')
+      const behindLayers = edit.layers.filter((layer) => layer.depth === 'behind-subject' && maskAvailable)
+      const foregroundLayers = edit.layers.filter((layer) => layer.depth !== 'behind-subject' || !maskAvailable)
 
-      if (headline) {
-        const size = Math.max(28, Math.min(width * 0.14, height * 0.19))
-        const faceY = face ? face.y * height : height * 0.3
-        const aboveHeadY = faceY - size * 0.78
-        const hasRoomAboveHead = aboveHeadY >= size * 0.68 + height * 0.035
-        const y = headline.placement === 'behind-subject' && maskAvailable
-          ? height * 0.54
-          : headline.placement === 'above-head' && face && hasRoomAboveHead ? aboveHeadY : height * 0.21
-        context.font = `1000 ${size}px Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif`
-        const headlineWidth = Math.min(width * 0.9, context.measureText(headline.text.toUpperCase()).width)
-        const headlineTop = y - size * 0.62
-        const headlineBottom = y + size * 0.62
-        const faceLeft = face ? (face.x - 0.035) * width : 0
-        const faceRight = face ? (face.x + face.width + 0.035) * width : 0
-        const faceTop = face ? (face.y - 0.025) * height : 0
-        const faceBottom = face ? (face.y + face.height + 0.025) * height : 0
-        const overlapsFace = Boolean(face && headlineTop < faceBottom && headlineBottom > faceTop && width / 2 - headlineWidth / 2 < faceRight && width / 2 + headlineWidth / 2 > faceLeft)
-        if (headlineBehind || !overlapsFace) {
-          const intro = Math.min(1, (time - headline.start) / 0.18)
-          context.save()
-          context.globalAlpha = intro
-          context.translate(width / 2, y - (1 - intro) * 16)
-          context.scale(0.94 + intro * 0.06, 0.94 + intro * 0.06)
-          context.textAlign = 'center'
-          context.textBaseline = 'middle'
-          context.font = `1000 ${size}px Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif`
-          context.lineJoin = 'round'
-          context.lineWidth = Math.max(2, size * 0.035)
-          context.strokeStyle = 'rgba(20, 12, 4, .48)'
-          context.shadowColor = 'rgba(0, 0, 0, .5)'
-          context.shadowBlur = size * 0.17
-          context.shadowOffsetY = size * 0.08
-          context.strokeText(headline.text.toUpperCase(), 0, 0, width * 0.9)
-          context.fillStyle = headlineBehind ? yellow : '#fff'
-          context.fillText(headline.text.toUpperCase(), 0, 0, width * 0.9)
-          context.restore()
-        }
-      }
+      behindLayers.forEach((layer) => drawMotionLayer(context, layer, time, width, height))
 
-      if (caption) {
-        const activeWord = Math.max(0, caption.words.findIndex((word) => time >= word.start && time < word.end))
-        const behind = caption.placement === 'behind-subject' && maskAvailable
-        const editorial = caption.style === 'editorial'
-        const baseSize = Math.max(26, Math.min(width * (behind ? 0.105 : 0.084), height * 0.15))
-        const maxLineWidth = width * 0.9
-        const faceY = face ? face.y * height : height * 0.3
-        const aboveHeadY = faceY - baseSize * 0.9
-        const hasRoomAboveHead = aboveHeadY >= baseSize * 0.8 + height * 0.035
-        const y = behind
-          ? height * 0.56
-          : caption.placement === 'above-head' && face && hasRoomAboveHead ? aboveHeadY : caption.placement === 'upper' ? height * 0.2 : height * 0.78
-        const words = caption.words.map((word, index) => {
-          const active = index === activeWord
-          const scale = caption.style === 'impact'
-            ? active ? 1.28 : 1
-            : editorial ? active ? 1.16 : 0.88
-              : active ? 1.22 : 0.78
-          const fontSize = baseSize * scale
-          const family = editorial && active ? 'Georgia, "Times New Roman", serif' : 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif'
-          context.font = `${editorial && active ? 'italic 700' : '1000'} ${fontSize}px ${family}`
-          return { text: editorial && active ? word.text : word.text.toUpperCase(), active, fontSize, family, width: context.measureText(editorial && active ? word.text : word.text.toUpperCase()).width, kineticOffset: caption.style === 'kinetic' ? Math.sin(index * 1.7) * baseSize * 0.12 : 0 }
-        })
-        const gap = baseSize * 0.2
-        const totalWidth = words.reduce((sum, word) => sum + word.width, 0) + gap * Math.max(0, words.length - 1)
-        const fit = Math.min(1, maxLineWidth / totalWidth)
-        const intro = Math.min(1, (time - caption.start) / 0.12)
-        let x = (width - totalWidth * fit) / 2
-        context.save()
-        context.globalAlpha = intro * (behind ? 0.96 : 1)
-        context.textAlign = 'left'
-        context.textBaseline = 'middle'
-        context.lineJoin = 'round'
-        context.shadowColor = 'rgba(0, 0, 0, .5)'
-        context.shadowBlur = baseSize * 0.16
-        context.shadowOffsetY = baseSize * 0.06
-        for (const word of words) {
-          const wordWidth = word.width * fit
-          const pop = word.active ? 1 + Math.sin(Math.min(1, (time - caption.words[activeWord].start) / 0.12) * Math.PI) * 0.08 : 1
-          const centerX = x + wordWidth / 2
-          context.save()
-          context.translate(centerX, y + word.kineticOffset - (1 - intro) * 12)
-          context.scale(fit * pop, fit * pop)
-          context.font = `${word.active && editorial ? 'italic 700' : '1000'} ${word.fontSize}px ${word.family}`
-          context.strokeStyle = 'rgba(18, 18, 16, .72)'
-          context.lineWidth = Math.max(2, word.fontSize * 0.075)
-          context.strokeText(word.text, -word.width / 2, 0)
-          context.fillStyle = word.active ? yellow : '#fff'
-          context.fillText(word.text, -word.width / 2, 0)
-          context.restore()
-          x += (wordWidth + gap * fit)
-        }
-        context.restore()
-      }
-
-      if ((headlineBehind || captionBehind) && foregroundRef.current) {
+      if (behindLayers.length && foregroundRef.current) {
         context.save()
         context.translate(pivotX, pivotY)
         context.scale(Math.max(1, easedScale), Math.max(1, easedScale))
@@ -288,6 +287,8 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
         context.drawImage(foregroundRef.current, 0, 0, width, height)
         context.restore()
       }
+
+      foregroundLayers.forEach((layer) => drawMotionLayer(context, layer, time, width, height))
 
       if (now - lastUiUpdate.current > 120) {
         lastUiUpdate.current = now
@@ -386,9 +387,8 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
     }
   }
 
-  const activeHeadline = activeCue(edit.headlines, currentTime)
-  const activeCaption = activeCue(edit.captions, currentTime)
-  const activeSpokenWord = activeCaption?.words.find((word) => currentTime >= word.start && currentTime < word.end)
+  const activeLayer = activeCue(edit.layers, currentTime)
+  const activeSpokenWord = edit.layers.find((layer) => layer.kind === 'caption' && layer.words.some((word) => currentTime >= word.start && currentTime < word.end))?.words.find((word) => currentTime >= word.start && currentTime < word.end)
 
   return (
     <section className="video-preview-card" aria-label="AI-edited video preview">
@@ -407,9 +407,10 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
         <span className={`vision-status vision-status-${visualStatus}`}><i />{visualStatus === 'ready' ? 'Subject tracking active' : visualStatus === 'loading' ? 'Loading subject tracking…' : 'Using clean text placement'}</span>
         <button type="button" className="export-button" onClick={exportVideo} disabled={!ready || exporting}><Download size={15} />{exporting ? 'Rendering…' : 'Download video'}</button>
       </div>
+      <CreativeRuntimeInspector edit={edit} currentTime={currentTime} onSeek={(time) => { if (videoRef.current) videoRef.current.currentTime = time }} />
       {activeSpokenWord && <p className="sr-only" aria-live="polite">Caption: {activeSpokenWord.text}</p>}
-      {activeHeadline && <p className="sr-only" aria-live="polite">Headline: {activeHeadline.text}</p>}
-      <p className="caption-preview-note">Every spoken word appears in animated, speech-synced caption bursts. The AI chooses the typography, movement, and subject-aware placement.</p>
+      {activeLayer?.kind === 'headline' && <p className="sr-only" aria-live="polite">Headline: {activeLayer.words.map((word) => word.text).join(' ')}</p>}
+      <p className="caption-preview-note">The Creative Runtime composes editable text layers from your transcript, then renders the same scene graph for preview and export.</p>
       {exportMessage && <p className="export-message" role="status">{exportMessage}</p>}
     </section>
   )
