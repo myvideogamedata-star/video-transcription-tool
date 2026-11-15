@@ -25,12 +25,19 @@ export const HeadlinePlanSchema = z.object({
   placement: z.enum(['upper', 'above-head', 'behind-subject']),
 })
 
+export const CaptionGroupPlanSchema = z.object({
+  unitIndexes: z.array(z.number().int().nonnegative()).min(1).max(8),
+  style: z.enum(['impact', 'editorial', 'kinetic']),
+  placement: z.enum(['upper', 'above-head', 'behind-subject']),
+})
+
 export const ZoomPlanSchema = z.object({
   unitIndexes: z.array(z.number().int().nonnegative()).min(1).max(8),
   scale: z.number().min(1.04).max(1.16),
 })
 
 export const CaptionPlanSchema = z.object({
+  captions: z.array(CaptionGroupPlanSchema).max(140),
   headlines: z.array(HeadlinePlanSchema).max(12),
   zooms: z.array(ZoomPlanSchema).max(8),
 })
@@ -51,8 +58,16 @@ export const CaptionRequestSchema = z.object({
 
 export type CaptionStyle = z.infer<typeof CaptionStyleSchema>
 export type HeadlineCue = { start: number; end: number; text: string; placement: z.infer<typeof HeadlinePlanSchema>['placement'] }
+export type MotionCaptionCue = {
+  start: number
+  end: number
+  words: { text: string; start: number; end: number }[]
+  style: z.infer<typeof CaptionGroupPlanSchema>['style']
+  placement: z.infer<typeof CaptionGroupPlanSchema>['placement']
+}
 export type ZoomCue = { start: number; end: number; scale: number }
 export type CaptionResult = {
+  captions: MotionCaptionCue[]
   headlines: HeadlineCue[]
   zooms: ZoomCue[]
   timingPrecision: 'word' | 'phrase'

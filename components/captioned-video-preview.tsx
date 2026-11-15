@@ -51,6 +51,7 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
   const foregroundRef = useRef<HTMLCanvasElement | null>(null)
   const faceBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
   const lastSegmentAt = useRef(0)
+  const lastSegmentVideoTime = useRef(-1)
 
   const togglePlayback = useCallback(() => {
     const video = videoRef.current
@@ -65,6 +66,7 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
     let segmentBusy = false
     let segmenter: ImageSegmenter | null = null
     let faceLandmarker: FaceLandmarker | null = null
+    const segmentationFrame = document.createElement('canvas')
     const video = videoRef.current
     const canvas = canvasRef.current
     const context = canvas?.getContext('2d')
@@ -115,12 +117,18 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
       context.drawImage(video, 0, 0, width, height)
       context.restore()
 
-      if (segmenter && faceLandmarker && !video.paused && !segmentBusy && now - lastSegmentAt.current > 110) {
+      if (segmenter && faceLandmarker && (!video.paused || time !== lastSegmentVideoTime.current) && !segmentBusy && now - lastSegmentAt.current > 110) {
         segmentBusy = true
         lastSegmentAt.current = now
+        lastSegmentVideoTime.current = time
         try {
-          const timestamp = Math.max(0, Math.round(time * 1000))
-          const faceResult = faceLandmarker.detectForVideo(video, timestamp)
+          const timestamp = Math.max(0, Math.round(now))
+          if (segmentationFrame.width !== video.videoWidth || segmentationFrame.height !== video.videoHeight) {
+            segmentationFrame.width = video.videoWidth
+            segmentationFrame.height = video.videoHeight
+          }
+          segmentationFrame.getContext('2d')?.drawImage(video, 0, 0, segmentationFrame.width, segmentationFrame.height)
+          const faceResult = faceLandmarker.detectForVideo(segmentationFrame, timestamp)
           const landmarks = faceResult.faceLandmarks[0]
           if (landmarks?.length) {
             const xs = landmarks.map((point) => point.x), ys = landmarks.map((point) => point.y)
@@ -134,7 +142,7 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
               height: previousFace.height + (nextFace.height - previousFace.height) * 0.38,
             } : nextFace
           }
-          segmenter.segmentForVideo(video, timestamp, (result) => {
+          segmenter.segmentForVideo(segmentationFrame, timestamp, (result) => {
             const mask = result.confidenceMasks?.[0]
             if (!mask) { foregroundRef.current = null; segmentBusy = false; return }
             const maskWidth = mask.width, maskHeight = mask.height
@@ -156,7 +164,7 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
                 subject.width = width; subject.height = height
                 const subjectContext = subject.getContext('2d')
                 if (subjectContext) {
-                  subjectContext.drawImage(video, 0, 0, width, height)
+                  subjectContext.drawImage(segmentationFrame, 0, 0, width, height)
                   subjectContext.globalCompositeOperation = 'destination-in'
                   subjectContext.drawImage(maskCanvas, 0, 0, width, height)
                   foregroundRef.current = subject
@@ -173,17 +181,19 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
       }
 
       const headline = activeCue(edit.headlines, time)
-      const behindSubject = headline?.placement === 'behind-subject' && foregroundRef.current
+      const caption = activeCue(edit.captions, time)
+      const maskAvailable = Boolean(foregroundRef.current)
+      const headlineBehind = Boolean(maskAvailable && headline?.placement === 'behind-subject')
+      const captionBehind = Boolean(maskAvailable && caption?.placement === 'behind-subject')
+
       if (headline) {
-        const isBehind = Boolean(behindSubject)
         const size = Math.max(28, Math.min(width * 0.14, height * 0.19))
-        const face = faceBoxRef.current
         const faceY = face ? face.y * height : height * 0.3
         const aboveHeadY = faceY - size * 0.78
         const hasRoomAboveHead = aboveHeadY >= size * 0.68 + height * 0.035
-        const y = headline.placement === 'above-head' && face && hasRoomAboveHead
-          ? aboveHeadY
-          : height * 0.21
+        const y = headline.placement === 'behind-subject' && maskAvailable
+          ? height * 0.54
+          : headline.placement === 'above-head' && face && hasRoomAboveHead ? aboveHeadY : height * 0.21
         context.font = `1000 ${size}px Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif`
         const headlineWidth = Math.min(width * 0.9, context.measureText(headline.text.toUpperCase()).width)
         const headlineTop = y - size * 0.62
@@ -193,7 +203,7 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
         const faceTop = face ? (face.y - 0.025) * height : 0
         const faceBottom = face ? (face.y + face.height + 0.025) * height : 0
         const overlapsFace = Boolean(face && headlineTop < faceBottom && headlineBottom > faceTop && width / 2 - headlineWidth / 2 < faceRight && width / 2 + headlineWidth / 2 > faceLeft)
-        if (isBehind || !overlapsFace) {
+        if (headlineBehind || !overlapsFace) {
           const intro = Math.min(1, (time - headline.start) / 0.18)
           context.save()
           context.globalAlpha = intro
@@ -209,13 +219,68 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
           context.shadowBlur = size * 0.17
           context.shadowOffsetY = size * 0.08
           context.strokeText(headline.text.toUpperCase(), 0, 0, width * 0.9)
-          context.fillStyle = isBehind ? yellow : '#fff'
+          context.fillStyle = headlineBehind ? yellow : '#fff'
           context.fillText(headline.text.toUpperCase(), 0, 0, width * 0.9)
           context.restore()
         }
       }
 
-      if (behindSubject && foregroundRef.current) {
+      if (caption) {
+        const activeWord = Math.max(0, caption.words.findIndex((word) => time >= word.start && time < word.end))
+        const behind = caption.placement === 'behind-subject' && maskAvailable
+        const editorial = caption.style === 'editorial'
+        const baseSize = Math.max(26, Math.min(width * (behind ? 0.105 : 0.084), height * 0.15))
+        const maxLineWidth = width * 0.9
+        const faceY = face ? face.y * height : height * 0.3
+        const aboveHeadY = faceY - baseSize * 0.9
+        const hasRoomAboveHead = aboveHeadY >= baseSize * 0.8 + height * 0.035
+        const y = behind
+          ? height * 0.56
+          : caption.placement === 'above-head' && face && hasRoomAboveHead ? aboveHeadY : caption.placement === 'upper' ? height * 0.2 : height * 0.78
+        const words = caption.words.map((word, index) => {
+          const active = index === activeWord
+          const scale = caption.style === 'impact'
+            ? active ? 1.28 : 1
+            : editorial ? active ? 1.16 : 0.88
+              : active ? 1.22 : 0.78
+          const fontSize = baseSize * scale
+          const family = editorial && active ? 'Georgia, "Times New Roman", serif' : 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif'
+          context.font = `${editorial && active ? 'italic 700' : '1000'} ${fontSize}px ${family}`
+          return { text: editorial && active ? word.text : word.text.toUpperCase(), active, fontSize, family, width: context.measureText(editorial && active ? word.text : word.text.toUpperCase()).width, kineticOffset: caption.style === 'kinetic' ? Math.sin(index * 1.7) * baseSize * 0.12 : 0 }
+        })
+        const gap = baseSize * 0.2
+        const totalWidth = words.reduce((sum, word) => sum + word.width, 0) + gap * Math.max(0, words.length - 1)
+        const fit = Math.min(1, maxLineWidth / totalWidth)
+        const intro = Math.min(1, (time - caption.start) / 0.12)
+        let x = (width - totalWidth * fit) / 2
+        context.save()
+        context.globalAlpha = intro * (behind ? 0.96 : 1)
+        context.textAlign = 'left'
+        context.textBaseline = 'middle'
+        context.lineJoin = 'round'
+        context.shadowColor = 'rgba(0, 0, 0, .5)'
+        context.shadowBlur = baseSize * 0.16
+        context.shadowOffsetY = baseSize * 0.06
+        for (const word of words) {
+          const wordWidth = word.width * fit
+          const pop = word.active ? 1 + Math.sin(Math.min(1, (time - caption.words[activeWord].start) / 0.12) * Math.PI) * 0.08 : 1
+          const centerX = x + wordWidth / 2
+          context.save()
+          context.translate(centerX, y + word.kineticOffset - (1 - intro) * 12)
+          context.scale(fit * pop, fit * pop)
+          context.font = `${word.active && editorial ? 'italic 700' : '1000'} ${word.fontSize}px ${word.family}`
+          context.strokeStyle = 'rgba(18, 18, 16, .72)'
+          context.lineWidth = Math.max(2, word.fontSize * 0.075)
+          context.strokeText(word.text, -word.width / 2, 0)
+          context.fillStyle = word.active ? yellow : '#fff'
+          context.fillText(word.text, -word.width / 2, 0)
+          context.restore()
+          x += (wordWidth + gap * fit)
+        }
+        context.restore()
+      }
+
+      if ((headlineBehind || captionBehind) && foregroundRef.current) {
         context.save()
         context.translate(pivotX, pivotY)
         context.scale(Math.max(1, easedScale), Math.max(1, easedScale))
@@ -322,6 +387,8 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
   }
 
   const activeHeadline = activeCue(edit.headlines, currentTime)
+  const activeCaption = activeCue(edit.captions, currentTime)
+  const activeSpokenWord = activeCaption?.words.find((word) => currentTime >= word.start && currentTime < word.end)
 
   return (
     <section className="video-preview-card" aria-label="AI-edited video preview">
@@ -340,8 +407,9 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
         <span className={`vision-status vision-status-${visualStatus}`}><i />{visualStatus === 'ready' ? 'Subject tracking active' : visualStatus === 'loading' ? 'Loading subject tracking…' : 'Using clean text placement'}</span>
         <button type="button" className="export-button" onClick={exportVideo} disabled={!ready || exporting}><Download size={15} />{exporting ? 'Rendering…' : 'Download video'}</button>
       </div>
+      {activeSpokenWord && <p className="sr-only" aria-live="polite">Caption: {activeSpokenWord.text}</p>}
       {activeHeadline && <p className="sr-only" aria-live="polite">Headline: {activeHeadline.text}</p>}
-      <p className="caption-preview-note">Subtitles follow verified speech timing. The cinematic headlines and restrained zooms are selected by AI from your transcript and sampled video frames.</p>
+      <p className="caption-preview-note">Every spoken word appears in animated, speech-synced caption bursts. The AI chooses the typography, movement, and subject-aware placement.</p>
       {exportMessage && <p className="export-message" role="status">{exportMessage}</p>}
     </section>
   )

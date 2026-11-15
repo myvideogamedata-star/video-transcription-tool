@@ -4,7 +4,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Vocal — AI video editor',
-  description: 'Turn short videos into cinematic AI-directed edits with real-time speech captions, kinetic headlines, and subtle zooms.',
+  description: 'Turn short videos into premium AI-directed social edits with speech-synced animated captions, editorial typography, and subject-aware layering.',
   generator: 'v0.app',
   icons: {
     icon: [
