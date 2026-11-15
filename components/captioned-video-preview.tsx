@@ -12,7 +12,8 @@ type CaptionedVideoPreviewProps = { src: string; edit: CaptionResult }
 const MAX_PREVIEW_WIDTH = 1280
 const fontStacks = {
   sans: 'Arial, Helvetica, sans-serif',
-  condensed: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif',
+  condensed: '"Barlow Condensed", "Arial Narrow Bold", Impact, sans-serif',
+  monument: 'Anton, Impact, Haettenschweiler, sans-serif',
   serif: 'Georgia, "Times New Roman", serif',
   mono: '"Courier New", monospace',
   rounded: 'Trebuchet MS, Arial, sans-serif',
@@ -22,6 +23,10 @@ function drawMotionLayer(context: CanvasRenderingContext2D, layer: MotionTextLay
   if (time < layer.start || time >= layer.end) return
   const elapsed = Math.max(0, Math.min(1, (time - layer.start) / 0.16))
   const activeWord = layer.kind === 'caption' ? layer.words.find((word) => time >= word.start && time < word.end) : undefined
+  const entryDuration = layer.motion === 'impact' ? 0.22 : layer.motion === 'monument-rise' ? 0.28 : layer.motion === 'hero-expansion' ? 0.35 : 0.16
+  const entryProgress = Math.max(0, Math.min(1, (time - layer.start) / entryDuration))
+  const easedEntryProgress = 1 - (1 - entryProgress) ** 3
+  const exitProgress = Math.max(0, Math.min(1, (layer.end - time) / (layer.motion === 'hero-expansion' ? 0.18 : 0.12)))
   const fontSize = (word: MotionWord) => Math.max(14, Math.min(height * 0.34, height * word.fontScale))
   const font = (word: MotionWord) => `${word.italic ? 'italic ' : ''}${word.fontWeight} ${fontSize(word)}px ${fontStacks[word.fontFamily]}`
   const gap = height * 0.012
@@ -46,10 +51,14 @@ function drawMotionLayer(context: CanvasRenderingContext2D, layer: MotionTextLay
   if (line.words.length) lines.push(line)
 
   const totalHeight = lines.reduce((sum, item) => sum + item.height, 0)
-  const animationY = layer.motion === 'rise' ? (1 - elapsed) * height * 0.035 : 0
+  const animationY = layer.motion === 'monument-rise'
+    ? (1 - easedEntryProgress) * 36 * (height / 1080)
+    : layer.motion === 'rise' ? (1 - elapsed) * height * 0.035 : 0
   const animationX = layer.motion === 'slide' ? (1 - elapsed) * width * 0.07 : 0
-  const animationScale = layer.motion === 'pop' ? 0.92 + elapsed * 0.08 : 1
-  const animationAlpha = layer.motion === 'fade' ? elapsed : 1
+  const impactProgress = layer.motion === 'impact' ? entryProgress : activeWord ? Math.max(0, Math.min(1, (time - activeWord.start) / 0.22)) : 1
+  const impactScale = impactProgress < 0.65 ? 0.85 + 0.18 * (impactProgress / 0.65) : 1.03 - 0.03 * ((impactProgress - 0.65) / 0.35)
+  const animationScale = layer.motion === 'impact' ? impactScale : layer.motion === 'hero-expansion' ? 0.9 + easedEntryProgress * 0.1 : layer.motion === 'pop' ? 0.92 + elapsed * 0.08 : 1
+  const animationAlpha = layer.motion === 'monument-rise' || layer.motion === 'hero-expansion' ? easedEntryProgress * exitProgress : layer.motion === 'impact' ? Math.min(1, entryProgress * 5) * exitProgress : layer.motion === 'fade' ? elapsed * exitProgress : exitProgress
   const anchorX = layer.x * width + animationX
   const anchorY = layer.y * height + animationY
   const boxLeft = anchorX - maxWidth / 2
@@ -89,10 +98,10 @@ function drawMotionLayer(context: CanvasRenderingContext2D, layer: MotionTextLay
       context.font = font(entry.word)
       context.textAlign = 'center'
       context.strokeStyle = 'rgba(8, 10, 12, .76)'
-      context.lineWidth = Math.max(1.5, size * 0.075)
-      context.shadowColor = 'rgba(0, 0, 0, .5)'
-      context.shadowBlur = size * 0.16
-      context.shadowOffsetY = size * 0.05
+      context.lineWidth = Math.max(1, size * 0.035)
+      context.shadowColor = 'rgba(0, 0, 0, .42)'
+      context.shadowBlur = size * 0.06
+      context.shadowOffsetY = size * 0.02
       context.strokeText(entry.word.text, 0, 0)
       context.fillStyle = entry.word.color
       context.fillText(entry.word.text, 0, 0)
@@ -285,8 +294,18 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
       }
 
       const maskAvailable = Boolean(foregroundRef.current)
-      const behindLayers = activeEdit.layers.filter((layer) => layer.depth === 'behind-subject' && maskAvailable)
-      const foregroundLayers = activeEdit.layers.filter((layer) => layer.depth !== 'behind-subject' || !maskAvailable)
+      const behindLayers = activeEdit.layers.filter((layer) => layer.depth === 'behind-subject' && layer.kind === 'headline' && maskAvailable)
+      const foregroundLayers = activeEdit.layers.filter((layer) => !behindLayers.includes(layer))
+
+      if (behindLayers.length && foregroundRef.current) {
+        context.save()
+        context.filter = `blur(${Math.max(5, height * 0.008)}px)`
+        context.translate(pivotX, pivotY)
+        context.scale(Math.max(1, easedScale), Math.max(1, easedScale))
+        context.translate(-pivotX, -pivotY)
+        context.drawImage(video, 0, 0, width, height)
+        context.restore()
+      }
 
       behindLayers.forEach((layer) => drawMotionLayer(context, layer, time, width, height))
 
@@ -300,6 +319,16 @@ export default function CaptionedVideoPreview({ src, edit }: CaptionedVideoPrevi
       }
 
       foregroundLayers.forEach((layer) => drawMotionLayer(context, layer, time, width, height))
+
+      context.save()
+      context.font = `500 ${Math.max(10, height * 0.014)}px Inter, Arial, sans-serif`
+      context.textAlign = 'right'
+      context.textBaseline = 'bottom'
+      context.fillStyle = 'rgba(255, 245, 231, .82)'
+      context.shadowColor = 'rgba(0, 0, 0, .48)'
+      context.shadowBlur = 3
+      context.fillText('SHORTSAGENTS / MONUMENT 01', width * 0.965, height * 0.955, width * 0.56)
+      context.restore()
 
       if (now - lastUiUpdate.current > 120) {
         lastUiUpdate.current = now

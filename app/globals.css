@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@700;800&family=Inter:wght@500;600&display=swap');
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
@@ -29,6 +30,22 @@ h1 { margin: 13px 0 8px; font-family: Georgia, 'Times New Roman', serif; font-si
 .step.active { color: #376b58; font-weight: 600; }.step.active span { color: white; background: #4b7865; }
 .form-card, .result-card { border: 1px solid #e9eae5; border-radius: 15px; background: rgba(255,255,255,.9); box-shadow: 0 14px 40px rgba(37,42,35,.045); }
 .form-card { padding: 20px 24px 18px; }
+.style-options { margin-top: 12px; }
+.style-option { position: relative; width: 100%; min-height: 186px; display: flex; flex-direction: column; align-items: stretch; gap: 8px; overflow: hidden; padding: 17px 18px; border: 1px solid #252525; border-radius: 11px; color: #fff5e7; background: #111; text-align: left; cursor: pointer; transition: border-color .18s, box-shadow .18s, transform .18s; }
+.style-option:hover { border-color: #ff5a2a; transform: translateY(-1px); }
+.style-option:focus-visible { outline: 3px solid #ff5a2a; outline-offset: 3px; }
+.style-option.is-selected { border-color: #ff5a2a; box-shadow: 0 0 0 2px rgba(255,90,42,.16); }
+.style-option-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.style-code, .style-flagship { color: #c3bdb5; font-size: 9px; font-weight: 700; letter-spacing: .12em; }
+.style-flagship { padding: 5px 7px; border: 1px solid rgba(255,245,231,.18); border-radius: 999px; color: #ff9a79; font-size: 8px; }
+.style-title { font-family: Anton, Impact, sans-serif; font-size: 31px; letter-spacing: .015em; line-height: 1; }
+.style-description { max-width: 420px; color: #b2aaa1; font-size: 10px; line-height: 1.5; }
+.style-sample { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; padding-top: 9px; border-top: 1px solid rgba(255,245,231,.12); }
+.style-sample > span { font-family: Anton, Impact, sans-serif; font-size: 20px; letter-spacing: -.02em; }
+.style-sample b { color: #ff5a2a; font-weight: 400; }
+.style-sample small { color: #8d8780; font-family: Inter, Arial, sans-serif; font-size: 7px; font-weight: 500; letter-spacing: .08em; }
+.style-radio-indicator { position: absolute; top: 47px; right: 18px; width: 14px; height: 14px; border: 1px solid #8d8780; border-radius: 50%; }
+.style-option.is-selected .style-radio-indicator { border: 4px solid #ff5a2a; background: #fff5e7; }
 .field-heading { display: flex; align-items: center; gap: 10px; }
 .number { color: #91a194; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
 .field-heading label { font-size: 13px; font-weight: 650; }

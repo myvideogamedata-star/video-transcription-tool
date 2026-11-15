@@ -21,9 +21,10 @@ const looks: { name: string; fontFamily: TextFont; color: string; italic: boolea
   { name: 'Subtitles', fontFamily: 'sans', color: '#FFFFFF', italic: false, uppercase: false, background: 'pill', motion: 'fade' },
 ]
 
-const swatches = ['#FFFFFF', '#F4EBDD', '#F5D94E', '#F13F4B', '#7CC9E8', '#101820']
+const swatches = ['#FFF5E7', '#FF5A2A', '#111111', '#FFFFFF', '#F5D94E', '#7CC9E8']
 const fonts: { value: TextFont; label: string }[] = [
-  { value: 'condensed', label: 'Condensed' },
+  { value: 'monument', label: 'Anton display' },
+  { value: 'condensed', label: 'Barlow Condensed' },
   { value: 'serif', label: 'Editorial serif' },
   { value: 'sans', label: 'Clean sans' },
   { value: 'rounded', label: 'Rounded' },
@@ -35,6 +36,10 @@ const motions: { value: TextMotion; label: string }[] = [
   { value: 'rise', label: 'Rise' },
   { value: 'pop', label: 'Pop' },
   { value: 'slide', label: 'Slide' },
+  { value: 'impact', label: 'Impact reveal' },
+  { value: 'monument-rise', label: 'Monument rise' },
+  { value: 'hard-cut', label: 'Hard cut' },
+  { value: 'hero-expansion', label: 'Hero expansion' },
 ]
 
 function layerName(layer: MotionTextLayer) {
@@ -187,7 +192,7 @@ export default function CreativeRuntimeInspector({ edit, currentTime, selectedLa
         </div>}
       </div>
 
-      {zoom && <div className="runtime-zoom-controls"><span className="runtime-field-label">CAMERA ZOOM · {zoom.start.toFixed(1)}–{zoom.end.toFixed(1)}s</span><label className="runtime-slider"><span>AMPLITUDE <output>{zoom.scale.toFixed(2)}×</output></span><input aria-label="Camera zoom strength" type="range" min="1.04" max="1.16" step="0.01" value={zoom.scale} onChange={(event) => onUpdateZoom(selectedZoom, Number(event.target.value))} /></label></div>}
+      {zoom && <div className="runtime-zoom-controls"><span className="runtime-field-label">CAMERA ZOOM · {zoom.start.toFixed(1)}–{zoom.end.toFixed(1)}s</span><label className="runtime-slider"><span>AMPLITUDE <output>{zoom.scale.toFixed(2)}×</output></span><input aria-label="Camera zoom strength" type="range" min="1.04" max="1.1" step="0.01" value={zoom.scale} onChange={(event) => onUpdateZoom(selectedZoom, Number(event.target.value))} /></label></div>}
       <div className="runtime-depth-key"><span><i className="runtime-key-front" /> Front layer</span><span><i className="runtime-key-behind" /> Behind-subject</span><span><i className="runtime-key-zoom" /> Camera move</span></div>
     </section>
   )

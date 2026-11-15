@@ -11,6 +11,7 @@ type EditResponse = CaptionResult & { error?: string }
 
 const MAX_DURATION = 120
 const MAX_FILE_SIZE = 100 * 1024 * 1024
+type VideoStyle = 'monument'
 
 function formatTime(seconds: number) {
   const minutes = Math.floor(seconds / 60)
@@ -28,6 +29,7 @@ function waitForVideoEvent(video: HTMLVideoElement, event: 'loadedmetadata' | 'c
 export default function Home() {
   const fileInput = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
+  const [style, setStyle] = useState<VideoStyle | null>(null)
   const [duration, setDuration] = useState<number | null>(null)
   const [transcript, setTranscript] = useState('')
   const [units, setUnits] = useState<CaptionUnit[]>([])
@@ -54,6 +56,7 @@ export default function Home() {
     setTranscript('')
     setUnits([])
     setCaptionResult(null)
+    setStyle(null)
     setFile(null)
     setDuration(null)
     if (!next.type.startsWith('video/')) {
@@ -89,7 +92,7 @@ export default function Home() {
   }
 
   async function generateAICaptions() {
-    if (!file || busy) return
+    if (!file || !style || busy) return
     setError('')
     setBusy(true)
 
@@ -165,7 +168,7 @@ export default function Home() {
       const response = await fetch('/api/captions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: nextTranscript, units: nextUnits, duration, visualFrames }),
+        body: JSON.stringify({ transcript: nextTranscript, units: nextUnits, duration, visualFrames, style }),
       })
       const result = await response.json() as EditResponse
       if (!response.ok) throw new Error(result.error || 'AI caption generation failed. Please try again.')
@@ -199,6 +202,7 @@ export default function Home() {
     setTranscript('')
     setUnits([])
     setCaptionResult(null)
+    setStyle(null)
     setError('')
     if (fileInput.current) fileInput.current.value = ''
   }
@@ -214,13 +218,28 @@ export default function Home() {
             <input ref={fileInput} id="video-upload" className="visually-hidden" type="file" accept="video/*" onChange={(event) => chooseFile(event.target.files?.[0])} />
             {file ? <div className="file-row"><span className="file-icon"><FileVideo2 size={20} /></span><span className="file-name"><strong>{file.name}</strong><small>{formatTime(duration ?? 0)} · {(file.size / (1024 * 1024)).toFixed(1)} MB</small></span><button className="text-button" onClick={reset} disabled={busy} aria-label="Choose a different video">Change</button></div> : <button className="upload-zone" onClick={() => fileInput.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]) }}><span className="upload-icon"><Upload size={20} /></span><span className="upload-copy"><strong>Choose a video <span>or drop it here</span></strong><small>Nothing is processed until you generate the edit</small></span><span className="browse-label">Browse files</span></button>}
           </div>
-          <div className="divider" />
-          <div className="field-group"><div className="field-heading"><span className="number">02</span><span className="step-title">Creative Runtime</span></div><p className="field-help">GPT builds the first cut; then refine every layer, type style, color, depth, and camera move.</p><p className="privacy-note"><LockKeyhole size={14} aria-hidden="true" /> Verified speech timing and sampled video frames guide the composition.</p></div>
-          <button className="transcribe-button" onClick={generateAICaptions} disabled={!file || busy || Boolean(editResult)}>{busy ? <><LoaderCircle className="spinner" size={18} /> {stage === 'transcribing' ? 'Transcribing your video…' : stage === 'analyzing' ? 'Reading the video composition…' : 'Directing the Creative Runtime…'}</> : editResult ? <><Check size={18} /> Edit ready</> : <><WandSparkles size={18} /> Generate AI Edit <span>→</span></>}</button>
+          {file && <>
+            <div className="divider" />
+            <div className="field-group">
+              <div className="field-heading"><span className="number">02</span><span className="step-title">Choose a style</span></div>
+              <p className="field-help">Select the visual direction for your edit.</p>
+              <div className="style-options" role="radiogroup" aria-label="Video editing style">
+                <button type="button" role="radio" aria-checked={style === 'monument'} className={`style-option${style === 'monument' ? ' is-selected' : ''}`} onClick={() => setStyle('monument')}>
+                  <span className="style-option-top"><span className="style-code">STYLE - 01</span><span className="style-flagship">FLAGSHIP STYLE</span></span>
+                  <span className="style-title">MONUMENT</span>
+                  <span className="style-description">Massive condensed headlines, dramatic scale changes, text behind the subject, and powerful word entrances.</span>
+                  <span className="style-sample" aria-hidden="true"><span>EDIT <b>LESS.</b></span><small>SHORTSAGENTS / MONUMENT 01</small></span>
+                  <span className="style-radio-indicator" aria-hidden="true" />
+                </button>
+              </div>
+              <p className="privacy-note"><LockKeyhole size={14} aria-hidden="true" /> Verified speech timing and sampled video frames guide the composition.</p>
+            </div>
+          </>}
+          <button className="transcribe-button" onClick={generateAICaptions} disabled={!file || !style || busy || Boolean(editResult)}>{busy ? <><LoaderCircle className="spinner" size={18} /> {stage === 'transcribing' ? 'Transcribing your video…' : stage === 'analyzing' ? 'Reading the video composition…' : 'Directing the Creative Runtime…'}</> : editResult ? <><Check size={18} /> Edit ready</> : <><WandSparkles size={18} /> Generate AI Edit <span>→</span></>}</button>
           <p className="time-note">The transcript provides exact words and timing. GPT directs; the motion engine renders.</p>
           {error && <p className="error-message" role="alert">{error}</p>}
         </section>
-        {editResult && videoUrl && <section className="caption-result" aria-labelledby="caption-result-title"><div className="caption-result-heading"><div className="result-label"><Check size={14} /> SCENE GRAPH COMPOSED</div><h2 id="caption-result-title">Your video, in motion</h2><p>GPT directs the composition. VocalAgents Motion Engine renders every layer, frame by frame.</p></div><CaptionedVideoPreview src={videoUrl} edit={editResult} /></section>}
+        {editResult && videoUrl && <section className="caption-result" aria-labelledby="caption-result-title"><div className="caption-result-heading"><div className="result-label"><Check size={14} /> STYLE - 01 · MONUMENT · SCENE GRAPH</div><h2 id="caption-result-title">Your video, in motion</h2><p>GPT directs the composition. VocalAgents Motion Engine renders every layer, frame by frame.</p></div><CaptionedVideoPreview src={videoUrl} edit={editResult} /></section>}
         {transcript && <section className="result-card" aria-labelledby="transcript-title"><div className="result-heading"><div><div className="result-label"><Check size={14} /> TRANSCRIPTION COMPLETE</div><h2 id="transcript-title">Your transcript</h2></div><button className="copy-button" onClick={copyTranscript}>{copied ? <Check size={16} /> : <Clipboard size={16} />}{copied ? 'Copied' : 'Copy text'}</button></div><p className="transcript-text">{transcript}</p><button className="start-over" onClick={reset}><RotateCcw size={14} /> Transcribe another video</button></section>}
         <footer className="page-footer"><span><LockKeyhole size={13} /> Your video isn’t saved by this app.</span><span>Transcription and edit direction by OpenAI</span></footer>
       </section>

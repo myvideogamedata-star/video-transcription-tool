@@ -28,20 +28,20 @@ const CreativeLayerSchema = z.object({
   width: z.number().min(0.2).max(0.96),
   align: z.enum(['left', 'center', 'right']),
   depth: z.enum(['foreground', 'behind-subject']),
-  fontFamily: z.enum(['sans', 'condensed', 'serif', 'mono', 'rounded']),
+  fontFamily: z.enum(['sans', 'condensed', 'monument', 'serif', 'mono', 'rounded']),
   fontScale: z.number().min(0.025).max(0.22),
   fontWeight: z.number().int().min(400).max(900),
   color: z.string().regex(/^#[\da-fA-F]{6}$/),
   italic: z.boolean(),
   uppercase: z.boolean(),
   background: z.enum(['none', 'pill', 'marker']),
-  motion: z.enum(['none', 'fade', 'rise', 'pop', 'slide']),
+  motion: z.enum(['none', 'fade', 'rise', 'pop', 'slide', 'impact', 'monument-rise', 'hard-cut', 'hero-expansion']),
   wordStyles: z.array(WordStyleSchema).max(12),
 })
 
 export const ZoomPlanSchema = z.object({
   unitIndexes: z.array(z.number().int().nonnegative()).min(1).max(8),
-  scale: z.number().min(1.04).max(1.16),
+  scale: z.number().min(1.04).max(1.1),
 })
 
 export const CaptionPlanSchema = z.object({
@@ -61,10 +61,11 @@ export const CaptionRequestSchema = z.object({
   units: z.array(CaptionUnitSchema).min(1).max(1_800),
   duration: z.number().finite().positive().max(120),
   visualFrames: z.array(VisualFrameSchema).min(1).max(60),
+  style: z.literal('monument'),
 }).refine((request) => request.units.every((unit) => unit.end <= request.duration + 0.5), 'Speech timing extends beyond the uploaded video')
 
-export type TextFont = 'sans' | 'condensed' | 'serif' | 'mono' | 'rounded'
-export type TextMotion = 'none' | 'fade' | 'rise' | 'pop' | 'slide'
+export type TextFont = 'sans' | 'condensed' | 'monument' | 'serif' | 'mono' | 'rounded'
+export type TextMotion = 'none' | 'fade' | 'rise' | 'pop' | 'slide' | 'impact' | 'monument-rise' | 'hard-cut' | 'hero-expansion'
 export type MotionWord = {
   text: string
   start: number
@@ -102,4 +103,5 @@ export type CaptionResult = {
   zooms: ZoomCue[]
   timingPrecision: 'word' | 'phrase'
   segmentationAvailable: boolean
+  style: 'monument'
 }
