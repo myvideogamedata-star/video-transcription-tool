@@ -11,18 +11,18 @@ export type CaptionUnit = z.infer<typeof CaptionUnitSchema>
 
 const WordStyleSchema = z.object({
   unitIndex: z.number().int().nonnegative(),
-  fontFamily: z.enum(['sans', 'condensed', 'serif', 'mono', 'rounded']).optional(),
-  fontScale: z.number().min(0.65).max(2.5).optional(),
-  fontWeight: z.number().int().min(400).max(900).optional(),
-  color: z.string().regex(/^#[\da-fA-F]{6}$/).optional(),
-  italic: z.boolean().optional(),
-  uppercase: z.boolean().optional(),
+  fontFamily: z.enum(['sans', 'condensed', 'serif', 'mono', 'rounded']).nullable(),
+  fontScale: z.number().min(0.65).max(2.5).nullable(),
+  fontWeight: z.number().int().min(400).max(900).nullable(),
+  color: z.string().regex(/^#[\da-fA-F]{6}$/).nullable(),
+  italic: z.boolean().nullable(),
+  uppercase: z.boolean().nullable(),
 })
 
 const CreativeLayerSchema = z.object({
   kind: z.enum(['caption', 'headline']),
   unitIndexes: z.array(z.number().int().nonnegative()).min(1).max(12),
-  text: z.string().trim().max(60).optional(),
+  text: z.string().trim().max(60).nullable(),
   x: z.number().min(0.05).max(0.95),
   y: z.number().min(0.05).max(0.95),
   width: z.number().min(0.2).max(0.96),

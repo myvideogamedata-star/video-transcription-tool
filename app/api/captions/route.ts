@@ -203,6 +203,7 @@ export async function POST(request: Request) {
       segmentationAvailable: hasSubject,
     })
   } catch (error) {
+    console.error('[vocal] AI edit planning error:', error)
     const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
     return NextResponse.json({
       error: timedOut ? 'AI edit planning took too long. Your transcript is ready; try again.' : 'AI edit planning failed. Your transcript is ready; please try again.',
